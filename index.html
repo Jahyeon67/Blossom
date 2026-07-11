@@ -413,6 +413,38 @@
   .cal-item .cal-info .t{ font-weight:600; margin-bottom:2px; }
   .cal-item .cal-info .time{ opacity:0.55; font-family:'IBM Plex Mono', monospace; font-size:0.68rem; }
 
+  .year-nav{ display:flex; align-items:center; justify-content:center; gap:22px; margin-bottom:26px; }
+  .year-nav button{
+    width:38px; height:38px; border-radius:50%; border:1px solid var(--line);
+    background:rgba(255,255,255,0.5); font-size:1.15rem; cursor:pointer; color:var(--bark);
+    transition:transform 0.15s ease, background 0.15s ease;
+  }
+  .year-nav button:hover{ transform:scale(1.08); background:rgba(184,76,116,0.12); }
+  .year-nav .year-label{
+    font-family:'Cormorant Garamond', serif; font-style:italic; font-weight:600;
+    font-size:2rem; min-width:100px; text-align:center;
+  }
+  .month-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:36px; }
+  @media (max-width:760px){ .month-grid{ grid-template-columns:repeat(3, 1fr); } }
+  @media (max-width:480px){ .month-grid{ grid-template-columns:repeat(2, 1fr); } }
+  .month-tile{
+    border-radius:16px; padding:20px 10px; text-align:center; cursor:pointer;
+    border:2px solid transparent; transition:transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .month-tile:hover{ transform:translateY(-4px); }
+  .month-tile.selected{ border-color:var(--rose); box-shadow:0 14px 28px -14px rgba(184,76,116,0.5); }
+  .month-tile .m-icon{ font-size:1.5rem; margin-bottom:8px; }
+  .month-tile .m-name{ font-family:'Cormorant Garamond', serif; font-style:italic; font-weight:600; font-size:1.25rem; margin-bottom:4px; }
+  .month-tile .m-season{ font-family:'IBM Plex Mono', monospace; font-size:0.62rem; letter-spacing:0.06em; opacity:0.65; }
+  .month-tile.winter{ background:linear-gradient(160deg, rgba(159,185,196,0.4), rgba(159,185,196,0.1)); }
+  .month-tile.spring{ background:linear-gradient(160deg, rgba(238,157,192,0.4), rgba(238,157,192,0.1)); }
+  .month-tile.summer{ background:linear-gradient(160deg, rgba(217,168,92,0.4), rgba(124,143,85,0.15)); }
+  .month-tile.fall{ background:linear-gradient(160deg, rgba(184,76,116,0.32), rgba(217,168,92,0.15)); }
+  .season-heading{
+    text-align:center; margin-bottom:22px; font-family:'Cormorant Garamond', serif;
+    font-style:italic; font-size:1.4rem; opacity:0.85;
+  }
+
   /* ---------- Modal ---------- */
   .modal-backdrop{
     position:fixed; inset:0;
@@ -633,14 +665,17 @@
       </div>
       <div class="chips" id="calendar-tabs">
         <span class="chip active" data-cal="week">This Week</span>
+        <span class="chip" data-cal="year">Browse Year</span>
         <span class="chip" data-cal="upcoming">Upcoming</span>
-        <span class="chip" data-cal="previous">Previous Season</span>
       </div>
       <br>
-      <div class="cal-controls" id="cal-season-controls" style="display:none;">
-        <select id="cal-season"></select>
-        <select id="cal-year"></select>
-        <button class="btn-solid" id="cal-load">Load</button>
+      <div id="cal-year-picker" style="display:none;">
+        <div class="year-nav">
+          <button id="year-prev" aria-label="Previous year">‹</button>
+          <span class="year-label" id="year-label"></span>
+          <button id="year-next" aria-label="Next year">›</button>
+        </div>
+        <div class="month-grid" id="month-grid"></div>
       </div>
       <div class="status" id="calendar-status" style="display:none;">Loading…</div>
       <div id="calendar-body"></div>
@@ -809,12 +844,7 @@
   function togglePlant(item){
     var g = getGarden();
     if (g[item.mal_id]) delete g[item.mal_id];
-    else g[item.mal_id] = {
-      mal_id: item.mal_id, title: item.title, type: item.type, episodes: item.episodes,
-      score: item.score, images: item.images, aired: item.aired, status: item.status,
-      studios: item.studios, genres: item.genres, synopsis: item.synopsis, rank: item.rank,
-      popularity: item.popularity, url: item.url, broadcast: item.broadcast
-    };
+    else g[item.mal_id] = item;
     saveGarden(g);
     renderGarden();
     return !!g[item.mal_id];
@@ -953,14 +983,15 @@
     return card;
   }
 
-  function renderCards(list, container){
+  function renderCards(list, container, statusFn){
     container = container || resultsEl;
+    statusFn = statusFn || setStatus;
     container.innerHTML = '';
     if (!list || list.length === 0){
-      setStatus('No results found. Try different filters.');
+      statusFn('No results found. Try different filters.');
       return;
     }
-    setStatus(null);
+    statusFn(null);
     list.forEach(function(item){ container.appendChild(buildCardEl(item)); });
   }
 
@@ -1078,10 +1109,31 @@
   document.getElementById('modal-backdrop').addEventListener('click', function(e){ if (e.target === this) closeModal(); });
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeModal(); });
 
+  var _requestChain = Promise.resolve();
+  var _lastRequestTime = 0;
+  function queuedFetch(url){
+    _requestChain = _requestChain.then(function(){
+      var wait = Math.max(0, 380 - (Date.now() - _lastRequestTime));
+      return new Promise(function(resolve){ setTimeout(resolve, wait); });
+    }).then(function(){
+      _lastRequestTime = Date.now();
+      return fetch(url);
+    });
+    return _requestChain;
+  }
+
   async function fetchJSON(url){
-    var res = await fetch(url);
-    if (!res.ok) throw new Error('Request failed: ' + res.status);
+    var res = await queuedFetch(url);
+    if (res.status === 429) throw new Error('RATE_LIMIT');
+    if (!res.ok) throw new Error('HTTP_' + res.status);
     return res.json();
+  }
+
+  function friendlyError(err){
+    if (err && err.message === 'RATE_LIMIT'){
+      return 'Too many requests at once — the anime database is briefly rate-limiting us. Wait a few seconds and try again.';
+    }
+    return 'Something went wrong. The anime database may be busy — try again in a moment.';
   }
 
   function setActiveChip(filter){
@@ -1111,7 +1163,7 @@
       }
       renderCards(list);
     } catch(err){
-      setStatus('Something went wrong loading results. The anime database may be busy — try again in a moment.');
+      setStatus(friendlyError(err));
     }
   }
 
@@ -1124,7 +1176,7 @@
       var data = await fetchJSON(API + '/anime?q=' + encodeURIComponent(query) + '&sfw=true&limit=12');
       renderCards(data.data);
     } catch(err){
-      setStatus('Something went wrong searching. The anime database may be busy — try again in a moment.');
+      setStatus(friendlyError(err));
     }
   }
 
@@ -1218,7 +1270,7 @@
       }
       renderCards(list);
     } catch(err){
-      setStatus('Something went wrong applying filters. Try again in a moment.');
+      setStatus(friendlyError(err));
     }
 
     document.getElementById('results-panel').scrollIntoView({ behavior:'smooth', block:'start' });
@@ -1238,40 +1290,83 @@
   // ---------- Calendar ----------
   var calBody = document.getElementById('calendar-body');
   var calStatus = document.getElementById('calendar-status');
-  var calSeasonControls = document.getElementById('cal-season-controls');
-  var calSeasonSelect = document.getElementById('cal-season');
-  var calYearSelect = document.getElementById('cal-year');
+  var calYearPicker = document.getElementById('cal-year-picker');
+  var monthGrid = document.getElementById('month-grid');
+  var yearLabel = document.getElementById('year-label');
 
   function setCalStatus(msg){
     if (!msg){ calStatus.style.display = 'none'; return; }
     calStatus.style.display = 'block'; calStatus.textContent = msg;
   }
 
-  ['winter','spring','summer','fall'].forEach(function(s){
-    var opt = document.createElement('option');
-    opt.value = s; opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-    calSeasonSelect.appendChild(opt);
-  });
-  for (var cy = 2027; cy >= 1970; cy--){
-    var copt = document.createElement('option');
-    copt.value = cy; copt.textContent = cy;
-    calYearSelect.appendChild(copt);
+  var MONTHS = [
+    { name:'January', short:'Jan', season:'winter', icon:'❄️' },
+    { name:'February', short:'Feb', season:'winter', icon:'❄️' },
+    { name:'March', short:'Mar', season:'winter', icon:'❄️' },
+    { name:'April', short:'Apr', season:'spring', icon:'🌸' },
+    { name:'May', short:'May', season:'spring', icon:'🌸' },
+    { name:'June', short:'Jun', season:'spring', icon:'🌸' },
+    { name:'July', short:'Jul', season:'summer', icon:'☀️' },
+    { name:'August', short:'Aug', season:'summer', icon:'☀️' },
+    { name:'September', short:'Sep', season:'summer', icon:'☀️' },
+    { name:'October', short:'Oct', season:'fall', icon:'🍂' },
+    { name:'November', short:'Nov', season:'fall', icon:'🍂' },
+    { name:'December', short:'Dec', season:'fall', icon:'🍂' }
+  ];
+  var seasonMonthsLabel = { winter:'Jan – Mar', spring:'Apr – Jun', summer:'Jul – Sep', fall:'Oct – Dec' };
+  function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  var browseYear = new Date().getFullYear();
+  var selectedMonthIdx = null;
+
+  function renderMonthGrid(){
+    yearLabel.textContent = browseYear;
+    monthGrid.innerHTML = '';
+    var now = new Date();
+    MONTHS.forEach(function(m, idx){
+      var isCurrent = (browseYear === now.getFullYear() && idx === now.getMonth());
+      var tile = document.createElement('div');
+      tile.className = 'month-tile ' + m.season + (selectedMonthIdx === idx ? ' selected' : '');
+      tile.innerHTML =
+        '<div class="m-icon">' + m.icon + '</div>' +
+        '<div class="m-name">' + m.short + (isCurrent ? ' •' : '') + '</div>' +
+        '<div class="m-season">' + m.season.toUpperCase() + '</div>';
+      tile.addEventListener('click', function(){
+        selectedMonthIdx = idx;
+        renderMonthGrid();
+        loadSeasonForMonth(idx, browseYear);
+      });
+      monthGrid.appendChild(tile);
+    });
   }
 
-  function currentSeasonInfo(){
-    var now = new Date();
-    var month = now.getMonth() + 1;
-    var year = now.getFullYear();
-    var seasons = ['winter','winter','winter','spring','spring','spring','summer','summer','summer','fall','fall','fall'];
-    var idx = ['winter','spring','summer','fall'].indexOf(seasons[month-1]);
-    var order = ['winter','spring','summer','fall'];
-    var prevIdx = idx - 1; var prevYear = year;
-    if (prevIdx < 0){ prevIdx = 3; prevYear = year - 1; }
-    return { season: order[idx], year: year, prevSeason: order[prevIdx], prevYear: prevYear };
+  async function loadSeasonForMonth(idx, year){
+    var m = MONTHS[idx];
+    setCalStatus('Loading…'); calBody.innerHTML = '';
+    try{
+      var data = await fetchJSON(API + '/seasons/' + year + '/' + m.season + '?limit=16');
+      setCalStatus(null);
+      var wrap = document.createElement('div');
+      var heading = document.createElement('div');
+      heading.className = 'season-heading';
+      heading.textContent = capitalize(m.season) + ' ' + year + ' — ' + seasonMonthsLabel[m.season];
+      wrap.appendChild(heading);
+      var grid = document.createElement('div');
+      grid.className = 'grid';
+      wrap.appendChild(grid);
+      calBody.appendChild(wrap);
+      renderCards(data.data, grid, setCalStatus);
+    } catch(err){
+      setCalStatus(friendlyError(err));
+    }
   }
-  var seasonInfo = currentSeasonInfo();
-  calSeasonSelect.value = seasonInfo.prevSeason;
-  calYearSelect.value = seasonInfo.prevYear;
+
+  document.getElementById('year-prev').addEventListener('click', function(){
+    browseYear--; selectedMonthIdx = null; renderMonthGrid(); calBody.innerHTML = ''; setCalStatus(null);
+  });
+  document.getElementById('year-next').addEventListener('click', function(){
+    browseYear++; selectedMonthIdx = null; renderMonthGrid(); calBody.innerHTML = ''; setCalStatus(null);
+  });
 
   var dayOrder = ['Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays','Sundays'];
 
@@ -1313,7 +1408,7 @@
     var grid = document.createElement('div');
     grid.className = 'grid';
     calBody.appendChild(grid);
-    renderCards(list, grid);
+    renderCards(list, grid, setCalStatus);
   }
 
   async function loadWeek(){
@@ -1323,7 +1418,7 @@
       setCalStatus(null);
       renderWeek(data.data);
     } catch(err){
-      setCalStatus("Could not load this week's schedule. Try again in a moment.");
+      setCalStatus(friendlyError(err));
     }
   }
 
@@ -1334,20 +1429,7 @@
       setCalStatus(null);
       renderCalGrid(data.data);
     } catch(err){
-      setCalStatus('Could not load upcoming anime. Try again in a moment.');
-    }
-  }
-
-  async function loadPrevious(){
-    var season = calSeasonSelect.value;
-    var year = calYearSelect.value;
-    setCalStatus('Loading…'); calBody.innerHTML = '';
-    try{
-      var data = await fetchJSON(API + '/seasons/' + year + '/' + season + '?limit=16');
-      setCalStatus(null);
-      renderCalGrid(data.data);
-    } catch(err){
-      setCalStatus('Could not load that season. Try again in a moment.');
+      setCalStatus(friendlyError(err));
     }
   }
 
@@ -1356,13 +1438,19 @@
       document.querySelectorAll('.chip[data-cal]').forEach(function(c){ c.classList.remove('active'); });
       el.classList.add('active');
       var mode = el.getAttribute('data-cal');
-      calSeasonControls.style.display = (mode === 'previous') ? 'flex' : 'none';
+      calYearPicker.style.display = (mode === 'year') ? 'block' : 'none';
+      calBody.innerHTML = ''; setCalStatus(null);
       if (mode === 'week') loadWeek();
       else if (mode === 'upcoming') loadUpcoming();
-      else if (mode === 'previous') loadPrevious();
+      else if (mode === 'year'){
+        var now = new Date();
+        browseYear = now.getFullYear();
+        selectedMonthIdx = now.getMonth();
+        renderMonthGrid();
+        loadSeasonForMonth(selectedMonthIdx, browseYear);
+      }
     });
   });
-  document.getElementById('cal-load').addEventListener('click', loadPrevious);
 
   // ---------- Character comparison ----------
   function renderCharResults(list, targetEl, slot){
@@ -1385,7 +1473,7 @@
       var data = await fetchJSON(API + '/characters?q=' + encodeURIComponent(query) + '&limit=8');
       renderCharResults(data.data || [], resEl, slot);
     } catch(err){
-      resEl.innerHTML = '<span style="opacity:0.5; font-size:0.82rem; padding:6px;">Search failed — try again.</span>';
+      resEl.innerHTML = '<span style="opacity:0.5; font-size:0.82rem; padding:6px;">' + friendlyError(err) + '</span>';
     }
   }
 
@@ -1409,7 +1497,7 @@
           '<div><span class="label">APPEARS IN (MANGA)</span><span style="text-align:right; max-width:60%;">' + manga + '</span></div>' +
         '</div>';
     } catch(err){
-      cardEl.innerHTML = '<span style="opacity:0.55; font-style:italic;">Could not load this character. Try again.</span>';
+      cardEl.innerHTML = '<span style="opacity:0.55; font-style:italic;">' + friendlyError(err) + '</span>';
     }
   }
 
