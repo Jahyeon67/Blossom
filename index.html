@@ -1114,7 +1114,7 @@
   var _requestTimestamps = [];
 
   function queuedFetch(url){
-    _requestChain = _requestChain.then(function(){
+    var resultPromise = _requestChain.then(function(){
       return new Promise(function(resolve){
         var now = Date.now();
         // Enforce a safe gap between individual requests (per-second safety)
@@ -1134,7 +1134,12 @@
       _requestTimestamps.push(_lastRequestTime);
       return fetch(url);
     });
-    return _requestChain;
+
+    // Keep the shared queue alive no matter what happens to this individual request —
+    // one failed/rejected request must never permanently block every request after it.
+    _requestChain = resultPromise.catch(function(){});
+
+    return resultPromise;
   }
 
   async function fetchJSON(url, retriesLeft){
