@@ -1111,20 +1111,42 @@
 
   var _requestChain = Promise.resolve();
   var _lastRequestTime = 0;
+  var _requestTimestamps = [];
+
   function queuedFetch(url){
     _requestChain = _requestChain.then(function(){
-      var wait = Math.max(0, 380 - (Date.now() - _lastRequestTime));
-      return new Promise(function(resolve){ setTimeout(resolve, wait); });
+      return new Promise(function(resolve){
+        var now = Date.now();
+        // Enforce a safe gap between individual requests (per-second safety)
+        var gapWait = Math.max(0, 400 - (now - _lastRequestTime));
+
+        // Enforce a rolling per-minute cap, staying safely under Jikan's ~60/min limit
+        _requestTimestamps = _requestTimestamps.filter(function(t){ return now - t < 60000; });
+        var windowWait = 0;
+        if (_requestTimestamps.length >= 50){
+          windowWait = 60000 - (now - _requestTimestamps[0]) + 250;
+        }
+
+        setTimeout(resolve, Math.max(gapWait, windowWait));
+      });
     }).then(function(){
       _lastRequestTime = Date.now();
+      _requestTimestamps.push(_lastRequestTime);
       return fetch(url);
     });
     return _requestChain;
   }
 
-  async function fetchJSON(url){
+  async function fetchJSON(url, retriesLeft){
+    if (retriesLeft === undefined) retriesLeft = 2;
     var res = await queuedFetch(url);
-    if (res.status === 429) throw new Error('RATE_LIMIT');
+    if (res.status === 429){
+      if (retriesLeft > 0){
+        await new Promise(function(resolve){ setTimeout(resolve, 1800); });
+        return fetchJSON(url, retriesLeft - 1);
+      }
+      throw new Error('RATE_LIMIT');
+    }
     if (!res.ok) throw new Error('HTTP_' + res.status);
     return res.json();
   }
