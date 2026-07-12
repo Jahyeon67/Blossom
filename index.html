@@ -576,7 +576,7 @@
 
     <section class="hero">
       <div class="hero-inner">
-        <div class="eyebrow">◆ POWERED BY MYANIMELIST DATA</div>
+        <div class="eyebrow">◆ POWERED BY ANILIST DATA</div>
         <h1>Search the world <em>of anime</em>.</h1>
         <p class="lede">Find any series or movie — release dates, episode counts, scores, and synopses, all in one quiet garden.</p>
         <form class="search-box" id="search-form">
@@ -717,7 +717,7 @@
 
     <footer>
       <span>© 2026 Blossom. A garden for anime discovery.</span>
-      <span class="mono">DATA VIA JIKAN (MYANIMELIST)</span>
+      <span class="mono">DATA VIA ANILIST</span>
     </footer>
 
   </div>
@@ -908,7 +908,115 @@
     });
   }
   setInterval(tickCountdowns, 1000);
-  var API = 'https://api.jikan.moe/v4';
+  var ANILIST_ENDPOINT = 'https://graphql.anilist.co';
+
+  var MEDIA_FIELDS =
+    'id title{ romaji english native } coverImage{ extraLarge large } format episodes duration ' +
+    'status startDate{ year month day } endDate{ year month day } season seasonYear averageScore ' +
+    'popularity genres source siteUrl description(asHtml:false) ' +
+    'studiosMain: studios(isMain:true){ nodes{ name } } studiosOther: studios(isMain:false){ nodes{ name } } ' +
+    'trailer{ id site } nextAiringEpisode{ airingAt episode }';
+
+  async function gqlFetch(query, variables, retriesLeft){
+    if (retriesLeft === undefined) retriesLeft = 3;
+    var res = await queuedFetch(ANILIST_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query: query, variables: variables || {} })
+    });
+    if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504){
+      if (retriesLeft > 0){
+        await new Promise(function(resolve){ setTimeout(resolve, 1800); });
+        return gqlFetch(query, variables, retriesLeft - 1);
+      }
+      throw new Error(res.status === 429 ? 'RATE_LIMIT' : 'GATEWAY_TIMEOUT');
+    }
+    var json = await res.json();
+    if (json.errors && json.errors.length) throw new Error('GQL_ERROR: ' + json.errors[0].message);
+    return json.data;
+  }
+
+  function friendlyError(err){
+    if (err && err.message === 'RATE_LIMIT'){
+      return 'Too many requests at once — the anime database is briefly rate-limiting us. Wait a few seconds and try again.';
+    }
+    if (err && err.message === 'GATEWAY_TIMEOUT'){
+      return 'The anime database (AniList) is temporarily overloaded on its end and timed out. Please try again in a minute.';
+    }
+    return 'Something went wrong. The anime database may be busy — try again in a moment.';
+  }
+
+  // Converts an AniList Media object into the same shape the rest of this app already expects,
+  // so buildCardEl, openModal, countdown logic, and Your Garden don't need to change at all.
+  var typeMap = { TV:'TV', TV_SHORT:'TV', MOVIE:'Movie', OVA:'OVA', ONA:'ONA', SPECIAL:'Special', MUSIC:'Music' };
+  var statusMap = { RELEASING:'Currently Airing', FINISHED:'Finished Airing', NOT_YET_RELEASED:'Not yet aired', CANCELLED:'Cancelled', HIATUS:'On Hiatus' };
+  var monthNames = ['', 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var jstDayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var jstDayNamesPlural = ['Sundays','Mondays','Tuesdays','Wednesdays','Thursdays','Fridays','Saturdays'];
+
+  function fmtAniDate(d){
+    if (!d || !d.year) return null;
+    return (d.day ? d.day + ' ' : '') + (d.month ? monthNames[d.month] + ' ' : '') + d.year;
+  }
+
+  function normalizeAnime(m){
+    if (!m) return null;
+    var titleStr = (m.title && (m.title.english || m.title.romaji || m.title.native)) || 'Untitled';
+    var img = m.coverImage ? (m.coverImage.extraLarge || m.coverImage.large) : '';
+    var startStr = fmtAniDate(m.startDate);
+    var endStr = fmtAniDate(m.endDate);
+    var airedString = startStr ? (startStr + (endStr && endStr !== startStr ? ' to ' + endStr : (m.status === 'RELEASING' ? ' to ?' : ''))) : 'Date unknown';
+    var fromIso = (m.startDate && m.startDate.year) ?
+      (m.startDate.year + '-' + String(m.startDate.month || 1).padStart(2,'0') + '-' + String(m.startDate.day || 1).padStart(2,'0')) : null;
+
+    var broadcast = null;
+    if (m.nextAiringEpisode && m.nextAiringEpisode.airingAt){
+      var d = new Date(m.nextAiringEpisode.airingAt * 1000 + 9 * 3600 * 1000);
+      broadcast = {
+        day: jstDayNamesPlural[d.getUTCDay()],
+        time: String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0'),
+        string: 'Ep ' + m.nextAiringEpisode.episode + ' — ' + jstDayNames[d.getUTCDay()] + ' ' + String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0') + ' JST',
+        _nextAiringAt: m.nextAiringEpisode.airingAt * 1000,
+        _nextEpisode: m.nextAiringEpisode.episode
+      };
+    }
+
+    var trailerUrl = null;
+    if (m.trailer && m.trailer.id){
+      if (m.trailer.site === 'youtube') trailerUrl = 'https://www.youtube.com/watch?v=' + m.trailer.id;
+      else if (m.trailer.site === 'dailymotion') trailerUrl = 'https://www.dailymotion.com/video/' + m.trailer.id;
+    }
+
+    return {
+      mal_id: m.id,
+      title: titleStr,
+      title_japanese: (m.title && m.title.native) || null,
+      type: typeMap[m.format] || m.format || '—',
+      episodes: m.episodes || null,
+      duration: m.duration ? (m.duration + ' min per ep') : null,
+      status: statusMap[m.status] || m.status,
+      aired: { string: airedString, from: fromIso },
+      score: m.averageScore ? (m.averageScore / 10) : null,
+      scored_by: null,
+      rank: null,
+      popularity: m.popularity || null,
+      synopsis: m.description ? m.description.replace(/<[^>]+>/g, '') : '',
+      background: null,
+      images: { jpg: { large_image_url: img, image_url: img } },
+      studios: (m.studiosMain && m.studiosMain.nodes) ? m.studiosMain.nodes.map(function(s){ return { name: s.name }; }) : [],
+      producers: (m.studiosOther && m.studiosOther.nodes) ? m.studiosOther.nodes.map(function(s){ return { name: s.name }; }) : [],
+      genres: (m.genres || []).map(function(g){ return { name: g, mal_id: g }; }),
+      themes: [],
+      demographics: [],
+      source: m.source || null,
+      rating: null,
+      season: m.season ? (m.season.charAt(0) + m.season.slice(1).toLowerCase()) : null,
+      year: m.seasonYear || null,
+      url: m.siteUrl || '#',
+      trailer: trailerUrl ? { url: trailerUrl } : null,
+      broadcast: broadcast
+    };
+  }
   var resultsEl = document.getElementById('results');
   var statusEl = document.getElementById('status');
   var titleEl = document.getElementById('results-title');
@@ -1048,7 +1156,7 @@
             '<div><span class="label">RATING</span><span>' + rating + '</span></div>' +
             (broadcast ? '<div><span class="label">BROADCAST</span><span>' + broadcast + '</span></div>' : '') +
           '</div>' +
-          '<a class="modal-link" href="' + malUrl + '" target="_blank" rel="noopener">View on MyAnimeList →</a>' +
+          '<a class="modal-link" href="' + malUrl + '" target="_blank" rel="noopener">View on AniList →</a>' +
         '</div>' +
       '</div>' +
       '<div class="modal-body-section">' +
@@ -1075,18 +1183,22 @@
   async function loadRecommendations(id){
     var box = document.getElementById('modal-recs');
     try{
-      var data = await fetchJSON(API + '/anime/' + id + '/recommendations');
-      var list = (data.data || []).slice(0, 4).map(function(r){ return r.entry; });
+      var query = 'query($id:Int){ Media(id:$id){ recommendations(sort:RATING_DESC, perPage:4){ nodes{ mediaRecommendation{ id title{ romaji english } coverImage{ large } } } } } }';
+      var data = await gqlFetch(query, { id: id });
+      var list = ((data.Media && data.Media.recommendations && data.Media.recommendations.nodes) || [])
+        .map(function(n){ return n.mediaRecommendation; })
+        .filter(Boolean);
       if (!box) return;
       if (!list.length){ box.innerHTML = '<span style="opacity:0.5; font-size:0.85rem;">No recommendations found.</span>'; return; }
       box.innerHTML = '';
       list.forEach(function(entry){
-        var img = (entry.images && entry.images.jpg && entry.images.jpg.image_url) || '';
+        var img = (entry.coverImage && entry.coverImage.large) || '';
+        var titleStr = (entry.title && (entry.title.english || entry.title.romaji)) || 'Untitled';
         var mini = document.createElement('div');
         mini.style.cursor = 'pointer';
-        mini.innerHTML = '<img src="' + img + '" alt="' + escapeHtml(entry.title) + '" style="width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:8px; margin-bottom:6px;">' +
-          '<div style="font-size:0.78rem; font-weight:600; line-height:1.3;">' + escapeHtml(entry.title) + '</div>';
-        mini.addEventListener('click', function(){ openAnimeById(entry.mal_id); });
+        mini.innerHTML = '<img src="' + img + '" alt="' + escapeHtml(titleStr) + '" style="width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:8px; margin-bottom:6px;">' +
+          '<div style="font-size:0.78rem; font-weight:600; line-height:1.3;">' + escapeHtml(titleStr) + '</div>';
+        mini.addEventListener('click', function(){ openAnimeById(entry.id); });
         box.appendChild(mini);
       });
     } catch(err){
@@ -1097,8 +1209,13 @@
   async function openAnimeById(id){
     if (animeStore[id]){ openModal(id); return; }
     try{
-      var data = await fetchJSON(API + '/anime/' + id + '/full');
-      if (data.data){ animeStore[id] = data.data; openModal(id); }
+      var query = 'query($id:Int){ Media(id:$id){ ' + MEDIA_FIELDS + ' } }';
+      var data = await gqlFetch(query, { id: id });
+      if (data.Media){
+        var normalized = normalizeAnime(data.Media);
+        animeStore[normalized.mal_id] = normalized;
+        openModal(normalized.mal_id);
+      }
     } catch(err){}
   }
 
@@ -1113,17 +1230,17 @@
   var _lastRequestTime = 0;
   var _requestTimestamps = [];
 
-  function queuedFetch(url){
+  function queuedFetch(url, options){
     var resultPromise = _requestChain.then(function(){
       return new Promise(function(resolve){
         var now = Date.now();
         // Enforce a safe gap between individual requests (per-second safety)
-        var gapWait = Math.max(0, 400 - (now - _lastRequestTime));
+        var gapWait = Math.max(0, 350 - (now - _lastRequestTime));
 
-        // Enforce a rolling per-minute cap, staying safely under Jikan's ~60/min limit
+        // Enforce a rolling per-minute cap, staying safely under AniList's 90/min limit
         _requestTimestamps = _requestTimestamps.filter(function(t){ return now - t < 60000; });
         var windowWait = 0;
-        if (_requestTimestamps.length >= 50){
+        if (_requestTimestamps.length >= 75){
           windowWait = 60000 - (now - _requestTimestamps[0]) + 250;
         }
 
@@ -1132,7 +1249,7 @@
     }).then(function(){
       _lastRequestTime = Date.now();
       _requestTimestamps.push(_lastRequestTime);
-      return fetch(url);
+      return fetch(url, options);
     });
 
     // Keep the shared queue alive no matter what happens to this individual request —
@@ -1142,34 +1259,18 @@
     return resultPromise;
   }
 
-  async function fetchJSON(url, retriesLeft){
-    if (retriesLeft === undefined) retriesLeft = 3;
-    var res = await queuedFetch(url);
-    if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504){
-      if (retriesLeft > 0){
-        await new Promise(function(resolve){ setTimeout(resolve, 1800); });
-        return fetchJSON(url, retriesLeft - 1);
-      }
-      throw new Error(res.status === 429 ? 'RATE_LIMIT' : 'GATEWAY_TIMEOUT');
-    }
-    if (!res.ok) throw new Error('HTTP_' + res.status);
-    return res.json();
-  }
-
-  function friendlyError(err){
-    if (err && err.message === 'RATE_LIMIT'){
-      return 'Too many requests at once — the anime database is briefly rate-limiting us. Wait a few seconds and try again.';
-    }
-    if (err && err.message === 'GATEWAY_TIMEOUT'){
-      return 'The anime database (Jikan/MyAnimeList) is temporarily overloaded on its end and timed out. This is a known limitation of the free public API, not a bug in the site — please try again in a minute.';
-    }
-    return 'Something went wrong. The anime database may be busy — try again in a moment.';
-  }
-
   function setActiveChip(filter){
+
     document.querySelectorAll('.chip[data-filter]').forEach(function(c){
       c.classList.toggle('active', c.getAttribute('data-filter') === filter);
     });
+  }
+
+  function currentAniSeason(){
+    var now = new Date();
+    var month = now.getMonth() + 1;
+    var seasons = ['WINTER','WINTER','WINTER','SPRING','SPRING','SPRING','SUMMER','SUMMER','SUMMER','FALL','FALL','FALL'];
+    return { season: seasons[month - 1], year: now.getFullYear() };
   }
 
   async function loadFilter(filter){
@@ -1177,21 +1278,30 @@
     setStatus('Loading…');
     resultsEl.innerHTML = '';
     try{
-      var data, list;
+      var query, variables, data, list;
       if (filter === 'top'){
         titleEl.textContent = 'Trending now'; subEl.textContent = 'TOP RATED';
-        data = await fetchJSON(API + '/top/anime?limit=12'); list = data.data;
+        query = 'query($perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, sort:[SCORE_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        data = await gqlFetch(query, { perPage: 12 });
+        list = data.Page.media;
       } else if (filter === 'movie'){
         titleEl.textContent = 'Top movies'; subEl.textContent = 'MOVIES';
-        data = await fetchJSON(API + '/top/anime?type=movie&limit=12'); list = data.data;
+        query = 'query($perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, format:MOVIE, sort:[SCORE_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        data = await gqlFetch(query, { perPage: 12 });
+        list = data.Page.media;
       } else if (filter === 'tv'){
         titleEl.textContent = 'Top TV series'; subEl.textContent = 'TV SERIES';
-        data = await fetchJSON(API + '/top/anime?type=tv&limit=12'); list = data.data;
+        query = 'query($perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, format:TV, sort:[SCORE_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        data = await gqlFetch(query, { perPage: 12 });
+        list = data.Page.media;
       } else if (filter === 'season'){
         titleEl.textContent = 'Airing this season'; subEl.textContent = 'CURRENT SEASON';
-        data = await fetchJSON(API + '/seasons/now?limit=12'); list = data.data;
+        var cs = currentAniSeason();
+        query = 'query($season:MediaSeason,$year:Int,$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, season:$season, seasonYear:$year, sort:[POPULARITY_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        data = await gqlFetch(query, { season: cs.season, year: cs.year, perPage: 12 });
+        list = data.Page.media;
       }
-      renderCards(list);
+      renderCards((list || []).map(normalizeAnime));
     } catch(err){
       setStatus(friendlyError(err));
     }
@@ -1203,8 +1313,9 @@
     setActiveChip(null);
     setStatus('Loading…'); resultsEl.innerHTML = '';
     try{
-      var data = await fetchJSON(API + '/anime?q=' + encodeURIComponent(query) + '&sfw=true&limit=12');
-      renderCards(data.data);
+      var gql = 'query($q:String,$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, search:$q, isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+      var data = await gqlFetch(gql, { q: query, perPage: 12 });
+      renderCards((data.Page.media || []).map(normalizeAnime));
     } catch(err){
       setStatus(friendlyError(err));
     }
@@ -1233,21 +1344,22 @@
 
   async function loadGenres(){
     try{
-      var data = await fetchJSON(API + '/genres/anime');
-      var list = (data.data || []).sort(function(a,b){ return b.count - a.count; }).slice(0, 24);
+      var data = await gqlFetch('query{ GenreCollection }');
+      var list = (data.GenreCollection || []).slice(0, 24);
       var box = document.getElementById('genre-list');
       box.innerHTML = list.map(function(g){
-        return '<label class="genre-option"><input type="checkbox" class="genre-check" value="' + g.mal_id + '"> ' + escapeHtml(g.name) + '</label>';
+        return '<label class="genre-option"><input type="checkbox" class="genre-check" value="' + escapeHtml(g) + '"> ' + escapeHtml(g) + '</label>';
       }).join('');
     } catch(err){
       document.getElementById('genre-list').innerHTML = '<span style="opacity:0.55; font-size:0.82rem;">Genres unavailable right now.</span>';
     }
   }
 
-  async function resolveProducerId(name){
+  async function resolveStudio(name){
     try{
-      var data = await fetchJSON(API + '/producers?q=' + encodeURIComponent(name) + '&limit=1');
-      return (data.data && data.data[0]) ? data.data[0].mal_id : null;
+      var query = 'query($s:String,$perPage:Int){ Studio(search:$s){ id name media(perPage:$perPage, sort:POPULARITY_DESC){ nodes{ ' + MEDIA_FIELDS + ' } } } }';
+      var data = await gqlFetch(query, { s: name, perPage: 50 });
+      return data.Studio || null;
     } catch(err){ return null; }
   }
 
@@ -1259,46 +1371,75 @@
     var studioName = document.getElementById('filter-studio').value.trim();
     var sortPreset = document.getElementById('filter-sort').value;
     var sortMap = {
-      score: { order_by:'score', sort:'desc' },
-      popularity: { order_by:'popularity', sort:'asc' },
-      newest: { order_by:'start_date', sort:'desc' },
-      oldest: { order_by:'start_date', sort:'asc' },
-      title: { order_by:'title', sort:'asc' }
+      score: 'SCORE_DESC',
+      popularity: 'POPULARITY_DESC',
+      newest: 'START_DATE_DESC',
+      oldest: 'START_DATE',
+      title: 'TITLE_ROMAJI'
     };
-    var sortCfg = sortMap[sortPreset] || sortMap.score;
-
-    var params = new URLSearchParams();
-    params.set('limit', 24);
-    params.set('sfw', 'true');
-    if (selectedGenres.length) params.set('genres', selectedGenres.join(','));
-    if (year){ params.set('start_date', year + '-01-01'); params.set('end_date', year + '-12-31'); }
-    if (minScore) params.set('min_score', minScore);
-    params.set('order_by', sortCfg.order_by);
-    params.set('sort', sortCfg.sort);
+    var sortValue = sortMap[sortPreset] || sortMap.score;
 
     titleEl.textContent = 'Filtered results'; subEl.textContent = 'CUSTOM SEARCH';
     setActiveChip(null);
     setStatus('Loading…'); resultsEl.innerHTML = '';
 
-    try{
-      if (studioName){
-        var pid = await resolveProducerId(studioName);
-        if (pid){ params.set('producers', pid); }
-        else { setStatus('No studio found matching "' + studioName + '" — showing results without that filter.'); }
+    function applyClientFilters(list){
+      if (selectedGenres.length){
+        list = list.filter(function(m){ return (m.genres || []).some(function(g){ return selectedGenres.indexOf(g) !== -1; }); });
       }
-      var data = await fetchJSON(API + '/anime?' + params.toString());
-      var list = data.data || [];
+      if (year){
+        list = list.filter(function(m){ return m.seasonYear === parseInt(year, 10); });
+      }
+      if (minScore){
+        list = list.filter(function(m){ return m.averageScore && m.averageScore >= parseInt(minScore, 10) * 10; });
+      }
       if (length){
-        list = list.filter(function(item){
-          if (length === 'movie') return item.type === 'Movie';
-          var eps = item.episodes || 0;
+        list = list.filter(function(m){
+          if (length === 'movie') return m.format === 'MOVIE';
+          var eps = m.episodes || 0;
           if (length === 'short') return eps >= 1 && eps <= 12;
           if (length === 'medium') return eps >= 13 && eps <= 26;
           if (length === 'long') return eps >= 27;
           return true;
         });
       }
-      renderCards(list);
+      return list;
+    }
+
+    try{
+      var list;
+      if (studioName){
+        var studio = await resolveStudio(studioName);
+        if (studio && studio.media && studio.media.nodes){
+          list = applyClientFilters(studio.media.nodes);
+        } else {
+          setStatus('No studio found matching "' + studioName + '" — showing results without that filter.');
+          list = [];
+        }
+      } else {
+        var query = 'query($genres:[String],$year:Int,$minScore:Int,$sort:[MediaSort],$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, genre_in:$genres, seasonYear:$year, averageScore_greater:$minScore, sort:$sort, isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        var data = await gqlFetch(query, {
+          genres: selectedGenres.length ? selectedGenres : null,
+          year: year ? parseInt(year, 10) : null,
+          minScore: minScore ? parseInt(minScore, 10) * 10 : null,
+          sort: [sortValue],
+          perPage: 24
+        });
+        // genre/year/score are already applied server-side by the query above; only length needs a client-side pass
+        if (length){
+          list = data.Page.media.filter(function(m){
+            if (length === 'movie') return m.format === 'MOVIE';
+            var eps = m.episodes || 0;
+            if (length === 'short') return eps >= 1 && eps <= 12;
+            if (length === 'medium') return eps >= 13 && eps <= 26;
+            if (length === 'long') return eps >= 27;
+            return true;
+          });
+        } else {
+          list = data.Page.media;
+        }
+      }
+      renderCards((list || []).map(normalizeAnime));
     } catch(err){
       setStatus(friendlyError(err));
     }
@@ -1374,7 +1515,8 @@
     var m = MONTHS[idx];
     setCalStatus('Loading…'); calBody.innerHTML = '';
     try{
-      var data = await fetchJSON(API + '/seasons/' + year + '/' + m.season + '?limit=16');
+      var query = 'query($season:MediaSeason,$year:Int,$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, season:$season, seasonYear:$year, sort:[POPULARITY_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+      var data = await gqlFetch(query, { season: m.season.toUpperCase(), year: year, perPage: 16 });
       setCalStatus(null);
       var wrap = document.createElement('div');
       var heading = document.createElement('div');
@@ -1385,7 +1527,7 @@
       grid.className = 'grid';
       wrap.appendChild(grid);
       calBody.appendChild(wrap);
-      renderCards(data.data, grid, setCalStatus);
+      renderCards((data.Page.media || []).map(normalizeAnime), grid, setCalStatus);
     } catch(err){
       setCalStatus(friendlyError(err));
     }
@@ -1441,12 +1583,30 @@
     renderCards(list, grid, setCalStatus);
   }
 
+  function scheduleEntryToNormalized(entry){
+    var norm = normalizeAnime(entry.media);
+    var d = new Date(entry.airingAt * 1000 + 9 * 3600 * 1000);
+    var dayIdx = d.getUTCDay();
+    var timeStr = String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
+    norm.broadcast = {
+      day: jstDayNamesPlural[dayIdx],
+      time: timeStr,
+      string: 'Episode ' + entry.episode + ' — ' + jstDayNames[dayIdx] + ' ' + timeStr + ' JST',
+      _nextAiringAt: entry.airingAt * 1000,
+      _nextEpisode: entry.episode
+    };
+    return norm;
+  }
+
   async function loadWeek(){
     setCalStatus('Loading…'); calBody.innerHTML = '';
     try{
-      var data = await fetchJSON(API + '/schedules?limit=25&sfw=true');
+      var now = Math.floor(Date.now() / 1000);
+      var weekLater = now + 7 * 24 * 3600;
+      var query = 'query($start:Int,$end:Int,$perPage:Int){ Page(perPage:$perPage){ airingSchedules(airingAt_greater:$start, airingAt_lesser:$end, sort:TIME){ airingAt episode media{ ' + MEDIA_FIELDS + ' } } } }';
+      var data = await gqlFetch(query, { start: now, end: weekLater, perPage: 50 });
       setCalStatus(null);
-      renderWeek(data.data);
+      renderWeek((data.Page.airingSchedules || []).map(scheduleEntryToNormalized));
     } catch(err){
       setCalStatus(friendlyError(err));
     }
@@ -1455,9 +1615,10 @@
   async function loadUpcoming(){
     setCalStatus('Loading…'); calBody.innerHTML = '';
     try{
-      var data = await fetchJSON(API + '/seasons/upcoming?limit=16');
+      var query = 'query($perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, status:NOT_YET_RELEASED, sort:[POPULARITY_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+      var data = await gqlFetch(query, { perPage: 16 });
       setCalStatus(null);
-      renderCalGrid(data.data);
+      renderCalGrid((data.Page.media || []).map(normalizeAnime));
     } catch(err){
       setCalStatus(friendlyError(err));
     }
@@ -1500,8 +1661,12 @@
     var resEl = document.getElementById('compare-results-' + slot);
     resEl.innerHTML = '<span style="opacity:0.5; font-size:0.82rem; padding:6px;">Searching…</span>';
     try{
-      var data = await fetchJSON(API + '/characters?q=' + encodeURIComponent(query) + '&limit=8');
-      renderCharResults(data.data || [], resEl, slot);
+      var gql = 'query($q:String,$perPage:Int){ Page(perPage:$perPage){ characters(search:$q){ id name{ full } image{ large } } } }';
+      var data = await gqlFetch(gql, { q: query, perPage: 8 });
+      var list = (data.Page.characters || []).map(function(c){
+        return { mal_id: c.id, name: (c.name && c.name.full) || 'Unknown', images: { jpg: { image_url: (c.image && c.image.large) || '' } } };
+      });
+      renderCharResults(list, resEl, slot);
     } catch(err){
       resEl.innerHTML = '<span style="opacity:0.5; font-size:0.82rem; padding:6px;">' + friendlyError(err) + '</span>';
     }
@@ -1511,20 +1676,25 @@
     var cardEl = document.getElementById('compare-card-' + slot);
     cardEl.innerHTML = '<span style="opacity:0.55; font-style:italic;">Loading…</span>';
     try{
-      var data = await fetchJSON(API + '/characters/' + id + '/full');
-      var c = data.data;
-      var img = (c.images && c.images.jpg && c.images.jpg.image_url) || '';
-      var nicknames = (c.nicknames && c.nicknames.length) ? c.nicknames.map(escapeHtml).join(', ') : '—';
-      var anime = (c.anime || []).slice(0, 4).map(function(a){ return escapeHtml(a.anime.title); }).join(', ') || '—';
-      var manga = (c.manga || []).slice(0, 3).map(function(m){ return escapeHtml(m.manga.title); }).join(', ') || '—';
+      var gql = 'query($id:Int){ Character(id:$id){ id name{ full alternative } image{ large } favourites media(perPage:12, sort:POPULARITY_DESC){ edges{ node{ id type title{ romaji english } } } } } }';
+      var data = await gqlFetch(gql, { id: id });
+      var c = data.Character;
+      var img = (c.image && c.image.large) || '';
+      var name = (c.name && c.name.full) || 'Unknown';
+      var nicknames = (c.name && c.name.alternative && c.name.alternative.filter(Boolean).length) ? c.name.alternative.filter(Boolean).map(escapeHtml).join(', ') : '—';
+      var edges = (c.media && c.media.edges) || [];
+      var animeList = edges.filter(function(e){ return e.node.type === 'ANIME'; }).slice(0, 4)
+        .map(function(e){ return escapeHtml((e.node.title.english || e.node.title.romaji)); }).join(', ') || '—';
+      var mangaList = edges.filter(function(e){ return e.node.type === 'MANGA'; }).slice(0, 3)
+        .map(function(e){ return escapeHtml((e.node.title.english || e.node.title.romaji)); }).join(', ') || '—';
       cardEl.innerHTML =
-        '<img src="' + img + '" alt="' + escapeHtml(c.name) + '">' +
-        '<h3>' + escapeHtml(c.name) + '</h3>' +
+        '<img src="' + img + '" alt="' + escapeHtml(name) + '">' +
+        '<h3>' + escapeHtml(name) + '</h3>' +
         '<div class="compare-stats">' +
-          '<div><span class="label">FAVORITES</span><span>' + (c.favorites || 0).toLocaleString() + '</span></div>' +
+          '<div><span class="label">FAVORITES</span><span>' + (c.favourites || 0).toLocaleString() + '</span></div>' +
           '<div><span class="label">NICKNAMES</span><span style="text-align:right; max-width:60%;">' + nicknames + '</span></div>' +
-          '<div><span class="label">APPEARS IN (ANIME)</span><span style="text-align:right; max-width:60%;">' + anime + '</span></div>' +
-          '<div><span class="label">APPEARS IN (MANGA)</span><span style="text-align:right; max-width:60%;">' + manga + '</span></div>' +
+          '<div><span class="label">APPEARS IN (ANIME)</span><span style="text-align:right; max-width:60%;">' + animeList + '</span></div>' +
+          '<div><span class="label">APPEARS IN (MANGA)</span><span style="text-align:right; max-width:60%;">' + mangaList + '</span></div>' +
         '</div>';
     } catch(err){
       cardEl.innerHTML = '<span style="opacity:0.55; font-style:italic;">' + friendlyError(err) + '</span>';
