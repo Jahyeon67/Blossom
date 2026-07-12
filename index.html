@@ -502,6 +502,23 @@
   .modal-body-section p{ font-size:0.94rem; line-height:1.65; opacity:0.85; margin:0 0 22px; }
   .modal-genres{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:22px; }
   .modal-link{ display:inline-flex; align-items:center; gap:6px; color:var(--rose); font-weight:600; text-decoration:none; font-size:0.9rem; }
+  .trailer-frame{
+    position:relative;
+    width:100%;
+    aspect-ratio:16/9;
+    border-radius:14px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    background:var(--paper);
+    box-shadow:0 14px 30px -16px rgba(184,76,116,0.35);
+    margin-bottom:24px;
+  }
+  .trailer-frame iframe{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    border:none;
+  }
+  html.night .trailer-frame{ box-shadow:0 14px 30px -16px rgba(255,79,160,0.2); }
   @media (max-width:640px){
     .modal-hero{ grid-template-columns:1fr; }
     .modal-hero img{ max-width:160px; margin:0 auto; }
@@ -982,9 +999,16 @@
     }
 
     var trailerUrl = null;
+    var trailerEmbedUrl = null;
     if (m.trailer && m.trailer.id){
-      if (m.trailer.site === 'youtube') trailerUrl = 'https://www.youtube.com/watch?v=' + m.trailer.id;
-      else if (m.trailer.site === 'dailymotion') trailerUrl = 'https://www.dailymotion.com/video/' + m.trailer.id;
+      var safeId = encodeURIComponent(m.trailer.id);
+      if (m.trailer.site === 'youtube'){
+        trailerUrl = 'https://www.youtube.com/watch?v=' + safeId;
+        trailerEmbedUrl = 'https://www.youtube.com/embed/' + safeId;
+      } else if (m.trailer.site === 'dailymotion'){
+        trailerUrl = 'https://www.dailymotion.com/video/' + safeId;
+        trailerEmbedUrl = 'https://www.dailymotion.com/embed/video/' + safeId;
+      }
     }
 
     return {
@@ -1013,7 +1037,7 @@
       season: m.season ? (m.season.charAt(0) + m.season.slice(1).toLowerCase()) : null,
       year: m.seasonYear || null,
       url: m.siteUrl || '#',
-      trailer: trailerUrl ? { url: trailerUrl } : null,
+      trailer: trailerUrl ? { url: trailerUrl, embedUrl: trailerEmbedUrl } : null,
       broadcast: broadcast
     };
   }
@@ -1129,7 +1153,8 @@
     var background = item.background ? escapeHtml(item.background) : null;
     var genres = (item.genres || []).concat(item.themes || [], item.demographics || [])
       .map(function(g){ return '<span class="genre-chip">' + escapeHtml(g.name) + '</span>'; }).join('');
-    var trailerUrl = (item.trailer && item.trailer.url) ? item.trailer.url : null;
+    var trailerEmbedUrl = (item.trailer && item.trailer.embedUrl) ? item.trailer.embedUrl : null;
+    var trailerWatchUrl = (item.trailer && item.trailer.url) ? item.trailer.url : null;
     var malUrl = item.url || '#';
     var countdown = getCountdownTarget(item);
     var planted = isPlanted(item.mal_id);
@@ -1160,11 +1185,14 @@
         '</div>' +
       '</div>' +
       '<div class="modal-body-section">' +
+        (trailerEmbedUrl ?
+          '<h4>Trailer</h4><div class="trailer-frame"><iframe src="' + trailerEmbedUrl + '" title="' + title + ' trailer" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>'
+          : (trailerWatchUrl ? '<a class="modal-link" href="' + trailerWatchUrl + '" target="_blank" rel="noopener" style="margin-bottom:20px; display:inline-flex;">▶ Watch trailer</a>' : '')
+        ) +
         (genres ? '<h4>Genres &amp; Themes</h4><div class="modal-genres">' + genres + '</div>' : '') +
         '<h4>Synopsis</h4><p>' + synopsis + '</p>' +
         (background ? '<h4>Background</h4><p>' + background + '</p>' : '') +
         '<h4>Studio &amp; Production</h4><p><strong>Studio:</strong> ' + studios + '<br><strong>Producers:</strong> ' + producers + '</p>' +
-        (trailerUrl ? '<a class="modal-link" href="' + trailerUrl + '" target="_blank" rel="noopener">▶ Watch trailer</a>' : '') +
         '<h4 style="margin-top:24px;">More Like This</h4>' +
         '<div class="grid" id="modal-recs" style="grid-template-columns:repeat(4,1fr); gap:14px;"><span style="opacity:0.5; font-size:0.85rem;">Loading recommendations…</span></div>' +
       '</div>';
