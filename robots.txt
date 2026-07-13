@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://jahyeon67.github.io/Blossom/sitemap.xml
