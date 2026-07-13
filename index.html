@@ -445,6 +445,47 @@
     font-style:italic; font-size:1.4rem; opacity:0.85;
   }
 
+  /* ---------- Vibe / mood picker ---------- */
+  .vibe-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:20px; }
+  @media (max-width:800px){ .vibe-grid{ grid-template-columns:1fr; } }
+  .vibe-card{
+    border-radius:20px;
+    padding:28px 24px;
+    cursor:pointer;
+    border:1px solid var(--line);
+    position:relative;
+    overflow:hidden;
+    transition:transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  .vibe-card:hover{ transform:translateY(-5px); }
+  .vibe-card .vibe-icon{ font-size:2rem; margin-bottom:12px; display:block; }
+  .vibe-card h3{ font-size:1.4rem; font-weight:600; margin-bottom:8px; }
+  .vibe-card p{ font-size:0.86rem; opacity:0.72; line-height:1.5; margin:0 0 14px; font-family:'Work Sans', sans-serif; font-style:normal; }
+  .vibe-card .vibe-tags{ display:flex; gap:6px; flex-wrap:wrap; }
+  .vibe-card .vibe-tags span{
+    font-family:'IBM Plex Mono', monospace; font-size:0.62rem; letter-spacing:0.03em;
+    padding:3px 9px; border-radius:999px; background:rgba(255,255,255,0.5); opacity:0.75;
+  }
+  .vibe-card--cozy{ background:linear-gradient(160deg, rgba(217,168,92,0.28), rgba(238,157,192,0.14)); }
+  .vibe-card--deep{ background:linear-gradient(160deg, rgba(47,98,89,0.28), rgba(159,185,196,0.16)); }
+  .vibe-card--adrenaline{ background:linear-gradient(160deg, rgba(184,76,116,0.3), rgba(217,168,92,0.14)); }
+  .vibe-card--romantic{ background:linear-gradient(160deg, rgba(238,157,192,0.34), rgba(184,76,116,0.14)); }
+  .vibe-card--spooky{ background:linear-gradient(160deg, rgba(74,54,44,0.24), rgba(159,185,196,0.18)); }
+  .vibe-card--epic{ background:linear-gradient(160deg, rgba(217,168,92,0.3), rgba(124,143,85,0.18)); }
+  .vibe-card--scifi{ background:linear-gradient(160deg, rgba(159,185,196,0.32), rgba(47,98,89,0.16)); }
+  .vibe-card--laughs{ background:linear-gradient(160deg, rgba(217,168,92,0.32), rgba(238,157,192,0.2)); }
+  .vibe-card--bittersweet{ background:linear-gradient(160deg, rgba(184,76,116,0.24), rgba(74,54,44,0.16)); }
+  .vibe-card--cozy:hover{ box-shadow:0 18px 34px -16px rgba(217,168,92,0.45); }
+  .vibe-card--deep:hover{ box-shadow:0 18px 34px -16px rgba(47,98,89,0.45); }
+  .vibe-card--adrenaline:hover{ box-shadow:0 18px 34px -16px rgba(184,76,116,0.45); }
+  .vibe-card--romantic:hover{ box-shadow:0 18px 34px -16px rgba(238,157,192,0.5); }
+  .vibe-card--spooky:hover{ box-shadow:0 18px 34px -16px rgba(74,54,44,0.4); }
+  .vibe-card--epic:hover{ box-shadow:0 18px 34px -16px rgba(217,168,92,0.45); }
+  .vibe-card--scifi:hover{ box-shadow:0 18px 34px -16px rgba(159,185,196,0.5); }
+  .vibe-card--laughs:hover{ box-shadow:0 18px 34px -16px rgba(238,157,192,0.5); }
+  .vibe-card--bittersweet:hover{ box-shadow:0 18px 34px -16px rgba(184,76,116,0.4); }
+  html.night .vibe-card .vibe-tags span{ background:rgba(255,255,255,0.08); }
+
   /* ---------- Modal ---------- */
   .modal-backdrop{
     position:fixed; inset:0;
@@ -582,6 +623,7 @@
           <li><a href="#" data-filter="movie">Movies</a></li>
           <li><a href="#" data-filter="tv">TV Series</a></li>
           <li><a href="#" data-filter="season">This Season</a></li>
+          <li><a href="#vibe-panel">Vibes</a></li>
           <li><a href="#filters-panel">Filters</a></li>
           <li><a href="#calendar-panel">Calendar</a></li>
           <li><a href="#garden-panel">Your Garden</a></li>
@@ -608,6 +650,69 @@
         </div>
       </div>
     </section>
+
+    <div class="page-panel" id="vibe-panel">
+      <div class="section-head">
+        <h2>Find your vibe</h2>
+        <span class="mono">MOOD-BASED DISCOVERY</span>
+      </div>
+      <div class="vibe-grid" id="vibe-grid">
+        <div class="vibe-card vibe-card--cozy" data-vibe="cozy">
+          <span class="vibe-icon">🍵</span>
+          <h3>Cozy &amp; Chill</h3>
+          <p>Slow, gentle, comforting stories — the anime equivalent of a warm blanket.</p>
+          <div class="vibe-tags"><span>Slice of Life</span><span>Comedy</span><span>Iyashikei</span></div>
+        </div>
+        <div class="vibe-card vibe-card--deep" data-vibe="deep">
+          <span class="vibe-icon">🌌</span>
+          <h3>Deep &amp; Thoughtful</h3>
+          <p>Stories that sit with you after — introspective, unsettling, quietly devastating.</p>
+          <div class="vibe-tags"><span>Psychological</span><span>Drama</span><span>Mystery</span></div>
+        </div>
+        <div class="vibe-card vibe-card--adrenaline" data-vibe="adrenaline">
+          <span class="vibe-icon">⚡</span>
+          <h3>Pure Adrenaline</h3>
+          <p>Fast, loud, and relentless — for when you want your pulse up.</p>
+          <div class="vibe-tags"><span>Action</span><span>Shounen</span><span>Sports</span></div>
+        </div>
+        <div class="vibe-card vibe-card--romantic" data-vibe="romantic">
+          <span class="vibe-icon">💞</span>
+          <h3>Heartfelt &amp; Romantic</h3>
+          <p>Butterflies, longing, and slow-burn feelings — love stories worth the wait.</p>
+          <div class="vibe-tags"><span>Romance</span><span>Drama</span></div>
+        </div>
+        <div class="vibe-card vibe-card--spooky" data-vibe="spooky">
+          <span class="vibe-icon">👻</span>
+          <h3>Spooky &amp; Strange</h3>
+          <p>Unsettling, eerie, and just uncanny enough to keep the lights on.</p>
+          <div class="vibe-tags"><span>Horror</span><span>Supernatural</span><span>Mystery</span></div>
+        </div>
+        <div class="vibe-card vibe-card--epic" data-vibe="epic">
+          <span class="vibe-icon">🗡️</span>
+          <h3>Epic &amp; Grand</h3>
+          <p>Whole worlds to explore — quests, kingdoms, and sweeping adventure.</p>
+          <div class="vibe-tags"><span>Fantasy</span><span>Adventure</span><span>Isekai</span></div>
+        </div>
+        <div class="vibe-card vibe-card--scifi" data-vibe="scifi">
+          <span class="vibe-icon">🛸</span>
+          <h3>Mind-Bending Sci-Fi</h3>
+          <p>Time loops, strange machines, and futures that don't play by the rules.</p>
+          <div class="vibe-tags"><span>Sci-Fi</span><span>Mecha</span><span>Time Travel</span></div>
+        </div>
+        <div class="vibe-card vibe-card--laughs" data-vibe="laughs">
+          <span class="vibe-icon">😄</span>
+          <h3>Feel-Good Laughs</h3>
+          <p>Silly, warm, and easy — nothing here is trying to hurt you.</p>
+          <div class="vibe-tags"><span>Comedy</span><span>Parody</span></div>
+        </div>
+        <div class="vibe-card vibe-card--bittersweet" data-vibe="bittersweet">
+          <span class="vibe-icon">💔</span>
+          <h3>Bittersweet Tears</h3>
+          <p>Beautiful and sad in equal measure — bring tissues, not regrets.</p>
+          <div class="vibe-tags"><span>Drama</span><span>Psychological</span><span>Tragedy</span></div>
+        </div>
+      </div>
+    </div>
 
     <div class="page-panel" id="filters-panel">
       <div class="section-head">
@@ -1484,6 +1589,50 @@
     document.getElementById('filter-score').value = '';
     document.getElementById('filter-sort').value = 'score';
     loadFilter('top');
+  });
+
+  // ---------- Vibe / mood discovery ----------
+  var VIBE_PRESETS = {
+    cozy:        { label: 'Cozy & Chill',        genres: ['Slice of Life', 'Comedy'],           tags: ['Iyashikei'] },
+    deep:        { label: 'Deep & Thoughtful',   genres: ['Psychological', 'Drama', 'Mystery'], tags: [] },
+    adrenaline:  { label: 'Pure Adrenaline',     genres: ['Action', 'Sports'],                  tags: ['Shounen'] },
+    romantic:    { label: 'Heartfelt & Romantic', genres: ['Romance', 'Drama'],                 tags: [] },
+    spooky:      { label: 'Spooky & Strange',     genres: ['Horror', 'Supernatural', 'Mystery'], tags: [] },
+    epic:        { label: 'Epic & Grand',         genres: ['Fantasy', 'Adventure'],              tags: ['Isekai'] },
+    scifi:       { label: 'Mind-Bending Sci-Fi',  genres: ['Sci-Fi', 'Mecha'],                   tags: ['Time Travel'] },
+    laughs:      { label: 'Feel-Good Laughs',     genres: ['Comedy'],                            tags: ['Parody'] },
+    bittersweet: { label: 'Bittersweet Tears',    genres: ['Drama', 'Psychological'],            tags: ['Tragedy'] }
+  };
+
+  async function loadVibe(key){
+    var preset = VIBE_PRESETS[key];
+    if (!preset) return;
+    titleEl.textContent = preset.label; subEl.textContent = 'VIBE MATCH';
+    setActiveChip(null);
+    setStatus('Loading…'); resultsEl.innerHTML = '';
+    try{
+      var query = 'query($genres:[String],$tags:[String],$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, genre_in:$genres, tag_in:$tags, sort:[SCORE_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+      var data = await gqlFetch(query, {
+        genres: preset.genres,
+        tags: preset.tags.length ? preset.tags : null,
+        perPage: 16
+      });
+      var list = data.Page.media || [];
+      // If a niche tag combo returns too few results, fall back to genre-only matching
+      if (list.length < 4 && preset.tags.length){
+        var fallbackQuery = 'query($genres:[String],$perPage:Int){ Page(perPage:$perPage){ media(type:ANIME, genre_in:$genres, sort:[SCORE_DESC], isAdult:false){ ' + MEDIA_FIELDS + ' } } }';
+        var fallbackData = await gqlFetch(fallbackQuery, { genres: preset.genres, perPage: 16 });
+        list = fallbackData.Page.media || [];
+      }
+      renderCards(list.map(normalizeAnime));
+    } catch(err){
+      setStatus(friendlyError(err));
+    }
+    document.getElementById('results-panel').scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  document.querySelectorAll('.vibe-card').forEach(function(card){
+    card.addEventListener('click', function(){ loadVibe(card.getAttribute('data-vibe')); });
   });
 
   // ---------- Calendar ----------
